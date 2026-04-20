@@ -34,7 +34,6 @@ void play_sound(Note *sound, int size)
         Serial.println("le son va être jouer");
         for (int i = 0; i < size / sizeof(Note); i++)
         {
-            Serial.println("note");
             tone(SPEAKER, sound[i].freq, sound[i].time);
             delay(sound[i].time);
             noTone(SPEAKER);
