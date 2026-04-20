@@ -33,9 +33,14 @@ void play_sound(Note *sound, int size)
     {
         for (int i = 0; i < size / sizeof(Note); i++)
         {
+            if (sound[i].freq > 0){
             tone(SPEAKER, sound[i].freq, sound[i].time);
             delay(sound[i].time);
             noTone(SPEAKER);
+            }
+            else{
+                noTone(SPEAKER);
+            }
         }
     }
 }
