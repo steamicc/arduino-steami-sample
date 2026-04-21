@@ -123,6 +123,7 @@ pio device monitor -b 115200
 ## Available Examples
 
 * LED blinking : `LED/blink.cpp`
+* BUTTON detect button press : `BUTTON/led_on.cpp`
 
 ---
 
