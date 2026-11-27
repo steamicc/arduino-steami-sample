@@ -15,7 +15,7 @@ void setup() {
 void loop() {
   float h = humidite.read();         // NAN si la mesure manque
   ecran.clear();
-  ecran.title("Humidité");           // en haut ; s'affiche sans accent
+  ecran.title("Humidité");           // en haut ; accent affiché sur la V1c, pas sur la V1a/V1b
   ecran.value(h, "%");               // au centre, unité en dessous ; NAN s'écrit --
   ecran.bar(h);                      // barre remplie de 0 à 100, vide pour NAN
   ecran.subtitle(humidite.chip());   // nom du capteur, en bas
