@@ -1,4 +1,4 @@
-// Croquis de la page du wiki « Capteurs et écran (docs/software/arduino/capteurs.md) ».
+// Croquis de la page du wiki « Écran (docs/software/arduino/ecran.md) ».
 
 #include <SteamiDisplay.h>
 
@@ -14,7 +14,7 @@ void setup() {
   const int16_t cx = ecran.centerX(), cy = ecran.centerY();
   ecran.clear();                           // fond noir
   ecran.circle(cx, cy, ecran.radius() - 1, STEAMI_GREEN);
-  ecran.text("Bonjour !", cx - ecran.textWidth("Bonjour !") / 2, cy - 4);
+  ecran.text("Bonjour !", cx - ecran.textWidth("Bonjour !") / 2, cy - ecran.textHeight() / 2);
   ecran.show();                            // envoie l'image à l'écran
 }
 

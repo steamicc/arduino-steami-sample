@@ -1,4 +1,4 @@
-// Croquis de la page du wiki « Capteurs et écran (docs/software/arduino/capteurs.md) ».
+// Croquis de la page du wiki « Écran (docs/software/arduino/ecran.md) ».
 
 #include <SteamiGC9A01.h>
 
