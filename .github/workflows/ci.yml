@@ -23,10 +23,17 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
+      # The system Python of the runner is externally managed (PEP 668) and
+      # refuses pip installs: use a Python from setup-python instead.
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Check the scripts
         run: |
-          python3 -m pip install --user pytest
-          python3 -m pytest scripts/tests -q
+          python -m pip install pytest
+          python -m pytest scripts/tests -q
 
       - name: Compile every sketch
         run: scripts/compile-examples.sh build/bins
