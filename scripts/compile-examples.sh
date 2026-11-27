@@ -44,7 +44,19 @@ core_url="$(version core_url)"
 if ! arduino-cli core list 2>/dev/null | grep -q "STMicroelectronics:stm32 *${core}"; then
     arduino-cli core update-index --additional-urls "$core_url"
 fi
-arduino-cli core install "STMicroelectronics:stm32@${core}" --additional-urls "$core_url"
+# An install that fails (version missing from a stale index) is retried once
+# after refreshing the index.
+install_core() { arduino-cli core install "STMicroelectronics:stm32@${core}" --additional-urls "$core_url"; }
+if ! install_core; then
+    arduino-cli core update-index --additional-urls "$core_url"
+    install_core
+fi
+lib_install() {
+    if ! arduino-cli lib install "$@"; then
+        arduino-cli lib update-index
+        arduino-cli lib install "$@"
+    fi
+}
 # Both libraries come from the Arduino Library Manager: "STeaMi" is published
 # there by steamicc/arduino-steami-lib (one entry per release tag). arduino-cli
 # downloads the library index on the first lib install.
@@ -52,8 +64,8 @@ arduino-cli core install "STMicroelectronics:stm32@${core}" --additional-urls "$
 # its dependencies, it would replace the pinned STM32duinoBLE with the latest
 # one. So STM32duinoBLE is installed first at its pinned version, and STeaMi
 # with --no-deps.
-arduino-cli lib install "STM32duinoBLE@$(version STM32duinoBLE)"
-arduino-cli lib install "STeaMi@$(version STeaMi)" --no-deps
+lib_install "STM32duinoBLE@$(version STM32duinoBLE)"
+lib_install "STeaMi@$(version STeaMi)" --no-deps
 
 total=0
 passed=0

@@ -32,8 +32,8 @@ examples/
 - Use the STeaMi library headers (`#include <STeaMi.h>`, ...) for the
   sensors and the displays, and the board pin names (`LED_RED`, `A_BUTTON`,
   `SPEAKER`, ...) for the rest.
-- A sketch must compile for the `STMicroelectronics:stm32:STeaMi` board with
-  the versions of `versions.json`; the CI refuses the pull request otherwise.
+- A sketch must compile for the board named by `fqbn` in `versions.json`, with
+  the versions listed there; the CI refuses the pull request otherwise.
 
 ## Compile locally
 

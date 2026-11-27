@@ -22,7 +22,12 @@ case "$1" in
   core)
     if [ "$2" = "list" ]; then exit 0; fi
     exit 0 ;;
-  lib) exit 0 ;;
+  lib)
+    if [ "$2" = "update-index" ]; then touch "$FAKE_LOG.indexed"; exit 0; fi
+    if [ -n "$FAKE_STALE_INDEX" ] && [ "$2" = "install" ] && [ ! -e "$FAKE_LOG.indexed" ]; then
+      echo "Error: library not found" >&2; exit 1
+    fi
+    exit 0 ;;
   compile)
     out=""; sketch=""
     args=("$@")
@@ -171,3 +176,15 @@ def test_no_sketch_is_an_error(env) -> None:
     result = run(env, tmp / "examples", tmp / "out")
     assert result.returncode != 0
     assert "no sketch" in result.stdout + result.stderr
+
+
+def test_lib_install_is_retried_after_updating_a_stale_index(env) -> None:
+    environment, log, tmp = env
+    environment["FAKE_STALE_INDEX"] = "1"
+    examples = tmp / "examples"
+    sketch(examples, "BOUTONS", "LedsBoutons")
+    result = run(env, examples, tmp / "out")
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = [line for line in log.read_text().splitlines() if line.startswith("lib ")]
+    ble = f"lib install STM32duinoBLE@{VERSIONS['STM32duinoBLE']}"
+    assert lines[:3] == [ble, "lib update-index", ble]
