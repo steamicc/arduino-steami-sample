@@ -1,4 +1,4 @@
-// Croquis de la page du wiki « Capteurs et écran (docs/software/arduino/capteurs.md) ».
+// Croquis de la page du wiki « Capteurs (docs/software/arduino/capteurs.md) ».
 
 #include <SteamiAccelerometer.h>
 #include <SteamiGyroscope.h>
