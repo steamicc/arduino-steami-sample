@@ -1,139 +1,79 @@
-# Arduino STEAMI Sample
+# arduino-steami-sample
 
-A collection of Arduino (PlatformIO) sample projects for the STM32WB55 microcontroller.
-This repository demonstrates various features such as LED control, button input, BLE communication, sensors, displays, and simple interactive demos — ideal for STEAM education and embedded experimentation.
+Arduino sketches for the [STeaMi](https://github.com/steamicc) board, in French.
+They are the source of the sketches shown in the
+[STeaMi wiki](https://github.com/steamicc/wiki_steami): every sketch is
+compiled here with `arduino-cli`, and each release publishes the compiled
+binaries as an archive that the wiki uses for its **Téléverser** (upload)
+button.
 
----
+## Layout
 
-##  Project Structure
-
-```
-arduino-steami-sample/
-│
-├── BLE/        # Bluetooth Low Energy communication
-├── BUTTON/     # Button input examples
-├── DEMO/       # Combined demos
-├── GAME/       # Mini games
-├── LED/        # LED control and animations
-├── SCREEN/     # Display examples
-├── SENSOR/     # Sensor data acquisition
-├──  src/
-│   └── main.cpp   # Entry point (selects which sample to run)
-├── boards/ 
-├── platformio.ini
-└── README.md
+```text
+examples/
+  <GROUP>/
+    <Name>/
+      <Name>.ino
 ```
 
-Each folder contains standalone `.cpp` sample files.
+- One folder per sketch; the `.ino` file has the name of its folder (an
+  Arduino requirement).
+- The wiki identifies a sketch as `GROUP/Name` (for example
+  `BOUTONS/LedsBoutons`): the group is in upper case, the name is CamelCase.
+- Groups: `CAPTEURS`, `ECRAN`, `PREMIERS`, `CARTE`, `BOUTONS`, `BUZZER`.
+- `versions.json` is the single place that names the toolchain: STM32 core,
+  board (FQBN), STM32duinoBLE and STeaMi library versions.
+  Nothing else in the repository repeats them.
 
----
+## Conventions
 
-##  How It Works
+- Plain Arduino sketches with `setup()` and `loop()`; no PlatformIO project.
+- Comments and messages may be in French, the language of the wiki.
+- Use the STeaMi library headers (`#include <STeaMi.h>`, ...) for the
+  sensors and the displays, and the board pin names (`LED_RED`, `A_BUTTON`,
+  `SPEAKER`, ...) for the rest.
+- A sketch must compile for the board named by `fqbn` in `versions.json`, with
+  the versions listed there; the CI refuses the pull request otherwise.
 
-This project uses a **simple approach**:
+## Compile locally
 
- Samples are included directly in `src/main.cpp` using `#include`.
-
-Example:
-
-```cpp
-#include <Arduino.h>
-#include "../LED/blink.cpp"
-
-void setup() {
-  setup_blink();
-}
-
-void loop() {
-  loop_blink();
-}
-```
-
-Each sample must define:
-
-* a `setup_<name>()` function
-* a `loop_<name>()` function
-
----
-
-## Switching Between Samples
-
-To run a different example, simply edit `src/main.cpp`:
-
-```cpp
-#include <Arduino.h>
-
-// Select your sample here:
-#include "../LED/blink.cpp"
-// #include "../BUTTON/read_button.cpp"
-// #include "../BLE/advertiser.cpp"
-
-void setup() {
-  setup_blink();   // change accordingly
-}
-
-void loop() {
-  loop_blink();    // change accordingly
-}
-```
-
-Comment/uncomment the desired sample and update the function calls.
-
----
-
-## Requirements
-
-### Hardware
-
-* STM32WB55 development board
-
-### Software
-
-* [PlatformIO](https://platformio.org/)
-* Python 3.x
-
-### Installation
-
-Install PlatformIO Core:
+Requirements: [arduino-cli](https://arduino.github.io/arduino-cli/) on the
+`PATH`, `python3`.
 
 ```bash
-pip install platformio
+scripts/compile-examples.sh build/bins
 ```
 
-Verify installation:
+The script installs the core and the libraries at the versions of
+`versions.json` if needed, compiles every sketch and copies each binary to
+`build/bins/<GROUP>/<Name>.bin`. It does not stop at a failure: it names
+each failing sketch (`FAIL GROUP/Name`) and exits non-zero at the end if any
+of them failed.
+
+To run the checks of the scripts:
 
 ```bash
-pio --version
+python3 -m pytest scripts/tests -q
 ```
 
----
+## Releases
 
-## Build, Upload and Monitor
+Each merge to `main` is released by
+[semantic-release](https://semantic-release.gitbook.io/) from the
+[Conventional Commits](https://www.conventionalcommits.org/) messages
+(`feat` gives a minor version, `fix` a patch). The release `vX.Y.Z` carries
+the asset `steami-exemples-vX.Y.Z.zip`: an `index.json` and one
+`<GROUP>/<Name>.bin` per sketch, in the format of the
+[arduino-steami-lib](https://github.com/steamicc/arduino-steami-lib) examples
+archive. Releases are immutable: the archive is attached to a draft release,
+checked, then the release is published.
 
-From the root of the project:
+## License
 
-```bash
-pio run -t clean
-pio run -t upload
-pio device monitor -b 115200
-```
+GPL-3.0, see [LICENSE](LICENSE). Sketches written in the wiki pages are
+republished here under the same license.
 
----
+## Credits
 
-## Available Examples
-
-* LED blinking : `LED/blink.cpp`
-
----
-
-## Notes
-
-* This project intentionally uses a **simple and beginner-friendly structure**
-* `.cpp` files are directly included (not standard C++ practice, but practical for quick experimentation)
-* Only one sample should be included at a time in `main.cpp`
-
----
-
-## Goal
-
-Provide a simple, hackable, and educational environment to explore embedded programming on STM32WB55 using Arduino and PlatformIO.
+The `BOUTONS/LedsBoutons` and `BUZZER/Melodie` sketches come from the pull
+requests #3 and #4 by Aline Dumont.

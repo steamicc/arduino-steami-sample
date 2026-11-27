@@ -1,0 +1,197 @@
+name: Examples archive
+
+# Build the archive of compiled sketches (steami-exemples-<tag>.zip: index.json
+# plus one .bin per sketch), attach it to the DRAFT release <tag>, check what
+# GitHub stored, then publish the release. The repository enforces immutable
+# releases: once a release is published, no asset can be added, so the archive
+# can only be attached while the release is a draft. release.yml creates the
+# draft and calls this workflow.
+#
+# Manual run (retry of a failed attach or publication on a draft; main only):
+#   gh workflow run examples-archive.yml -f tag=v1.0.0 [-f dry_run=true]
+# A release that is already published cannot be backfilled.
+#
+# The sketches and the scripts come from the tag. An archive already attached
+# and fully uploaded (state "uploaded") is never replaced; one left in another
+# state by an interrupted upload is deleted and uploaded again. Every upload is
+# checked against the local zip (state, size, SHA-256 digest): on a mismatch the
+# asset is deleted and the job fails, so the draft is not published. The zip is
+# always uploaded as a workflow artifact before any write; a manual run with
+# dry_run stops there.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag (vX.Y.Z)'
+        required: true
+        type: string
+      depuis_publication:
+        description: 'Set by release.yml (skips the main-only guard)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      RELEASE_APP_ID:
+        required: true
+      RELEASE_APP_SECRET:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (vX.Y.Z)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build the archive and upload it as a workflow artifact, write nothing'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: examples-archive-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  examples-archive:
+    name: Build, attach and publish the examples archive
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Validate the tag and the ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          FROM_RELEASE: ${{ inputs.depuis_publication && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          # Under workflow_call, event_name and ref are the caller's: the
+          # main-only guard applies to direct manual runs only.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FROM_RELEASE" != "true" ] && [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow on main (got '$REF'): the workflow comes from the dispatched ref"
+            exit 1
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag '$TAG': expected vX.Y.Z"
+            exit 1
+          fi
+
+      # The App token is needed early: the default token cannot publish a
+      # release that other workflows will see. It lasts one hour, longer than
+      # the compilation.
+      - name: Generate token
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.RELEASE_APP_ID }}
+          private_key: ${{ secrets.RELEASE_APP_SECRET }}
+          repositories: >-
+            ["arduino-steami-sample"]
+
+      - name: Check that the release is a draft
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if ! is_draft="$(gh release view "$TAG" -R "$REPO" --json isDraft --jq '.isDraft')"; then
+            echo "::error::Cannot read release ${TAG} in ${REPO} (missing release or no access)"
+            exit 1
+          fi
+          if [ "$is_draft" != "true" ] && [ "$DRY_RUN" != "true" ]; then
+            echo "::error::Release ${TAG} in ${REPO} is already published: releases are immutable, no asset can be added. Only a draft release can receive the archive."
+            exit 1
+          fi
+
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      # Installs the core and the libraries at the versions of versions.json.
+      - name: Compile every sketch
+        run: scripts/compile-examples.sh build/bins
+
+      - name: Build the archive
+        run: python3 scripts/build-examples-archive.py --bins build/bins --tag "$TAG" --out "steami-exemples-${TAG}.zip"
+
+      - name: Upload the archive as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steami-exemples-${{ inputs.tag }}
+          path: steami-exemples-${{ inputs.tag }}.zip
+          if-no-files-found: error
+
+      - name: Attach the archive to the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          export ASSET="steami-exemples-${TAG}.zip"
+          # State of the archive already attached, empty if there is none.
+          # "uploaded" means complete; an interrupted upload leaves another
+          # state (e.g. "starter") and an unusable asset.
+          if ! state="$(gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[] | select(.name == env.ASSET) | .state')"; then
+            echo "::error::Cannot read release ${TAG} in ${REPO} (missing release or no access)"
+            exit 1
+          fi
+          if [ "$state" = "uploaded" ]; then
+            echo "::notice::${ASSET} is already attached to ${TAG} in ${REPO}: nothing written."
+            exit 0
+          fi
+          if [ -n "$state" ]; then
+            echo "::warning::${ASSET} is attached to ${TAG} in ${REPO} in state '${state}' (incomplete upload): deleted and uploaded again."
+            gh release delete-asset "$TAG" "$ASSET" -R "$REPO" --yes
+          fi
+          gh release upload "$TAG" "$ASSET" -R "$REPO"
+
+          # Check what GitHub stored against the local file.
+          size="$(stat -c %s "$ASSET")"
+          sha="$(sha256sum "$ASSET" | cut -d ' ' -f 1)"
+          remote="$(gh release view "$TAG" -R "$REPO" --json assets \
+            --jq '.assets[] | select(.name == env.ASSET) | "\(.state) \(.size) \(.digest // "")"')"
+          read -r r_state r_size r_digest <<< "$remote"
+          if [ "${r_state:-}" != "uploaded" ] || [ "${r_size:-}" != "$size" ] \
+            || { [ -n "${r_digest:-}" ] && [ "$r_digest" != "sha256:${sha}" ]; }; then
+            echo "::error::${ASSET} on ${TAG} in ${REPO} does not match the local archive (state '${r_state:-missing}', size ${r_size:-none} for ${size}, digest '${r_digest:-none}' for sha256:${sha}). The faulty asset is deleted: re-run this job."
+            gh release delete-asset "$TAG" "$ASSET" -R "$REPO" --yes || true
+            exit 1
+          fi
+          if [ -z "${r_digest:-}" ]; then
+            echo "::warning::GitHub gave no digest for ${ASSET}: checked on state and size only."
+          fi
+          echo "::notice::${ASSET} attached to ${TAG} in ${REPO} (${size} bytes, sha256:${sha})."
+
+      # Last step: from here the release is immutable. It is marked "latest"
+      # only if it has the highest version (sort -V) of the published ones, so
+      # a retry of an older tag never takes the label from a newer release.
+      - name: Publish the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          export ASSET="steami-exemples-${TAG}.zip"
+          state="$(gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[] | select(.name == env.ASSET) | .state')"
+          if [ "$state" != "uploaded" ]; then
+            echo "::error::${ASSET} is not attached to ${TAG} in state 'uploaded' (got '${state:-missing}'): the release stays a draft."
+            exit 1
+          fi
+          highest="$({ gh release list -R "$REPO" --limit 200 --json tagName,isDraft \
+            --jq '.[] | select(.isDraft | not) | .tagName'; echo "$TAG"; } | sort -V | tail -n 1)"
+          if [ "$highest" = "$TAG" ]; then
+            gh release edit "$TAG" -R "$REPO" --draft=false --latest
+          else
+            gh release edit "$TAG" -R "$REPO" --draft=false --latest=false
+          fi
+          echo "::notice::Release ${TAG} published in ${REPO}."
