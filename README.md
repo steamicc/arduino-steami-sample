@@ -2,7 +2,7 @@
 
 Arduino sketches for the [STeaMi](https://github.com/steamicc) board, in French.
 They are the source of the sketches shown in the
-[STeaMi wiki](https://github.com/steamicc/wiki-steami): every sketch is
+[STeaMi wiki](https://github.com/steamicc/wiki_steami): every sketch is
 compiled here with `arduino-cli`, and each release publishes the compiled
 binaries as an archive that the wiki uses for its **Téléverser** (upload)
 button.
@@ -46,8 +46,9 @@ scripts/compile-examples.sh build/bins
 
 The script installs the core and the libraries at the versions of
 `versions.json` if needed, compiles every sketch and copies each binary to
-`build/bins/<GROUP>/<Name>.bin`. It stops at the first sketch that fails and
-names it (`GROUP/Name`).
+`build/bins/<GROUP>/<Name>.bin`. It does not stop at a failure: it names
+each failing sketch (`FAIL GROUP/Name`) and exits non-zero at the end if any
+of them failed.
 
 To run the checks of the scripts:
 
