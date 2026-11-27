@@ -8,8 +8,9 @@
 # only place that names them) when they are missing.
 #
 # The binary of each sketch is copied to DIR/<GROUP>/<Name>.bin (input of
-# scripts/build-examples-archive.py). The script stops with a non-zero code
-# if a sketch does not compile, and names it as GROUP/Name.
+# scripts/build-examples-archive.py). Every sketch is compiled; each one that
+# does not compile is named as "FAIL GROUP/Name" with the end of its log, and
+# the script then exits with a non-zero code.
 #
 # Usage:
 #   scripts/compile-examples.sh DIR [--examples EXAMPLES_DIR]
@@ -44,9 +45,15 @@ if ! arduino-cli core list 2>/dev/null | grep -q "STMicroelectronics:stm32 *${co
     arduino-cli core update-index --additional-urls "$core_url"
 fi
 arduino-cli core install "STMicroelectronics:stm32@${core}" --additional-urls "$core_url"
-for lib in STM32duinoBLE STeaMi; do
-    arduino-cli lib install "${lib}@$(version "$lib")"
-done
+# Both libraries come from the Arduino Library Manager: "STeaMi" is published
+# there by steamicc/arduino-steami-lib (one entry per release tag). arduino-cli
+# downloads the library index on the first lib install.
+# STeaMi declares "depends=STM32duinoBLE" without a version: installed with
+# its dependencies, it would replace the pinned STM32duinoBLE with the latest
+# one. So STM32duinoBLE is installed first at its pinned version, and STeaMi
+# with --no-deps.
+arduino-cli lib install "STM32duinoBLE@$(version STM32duinoBLE)"
+arduino-cli lib install "STeaMi@$(version STeaMi)" --no-deps
 
 total=0
 passed=0

@@ -107,6 +107,20 @@ def test_versions_come_from_versions_json(env) -> None:
     assert f"--fqbn {VERSIONS['fqbn']}" in calls
 
 
+def test_steami_does_not_replace_the_pinned_ble_library(env) -> None:
+    """STeaMi depends on STM32duinoBLE without a version: installing it with
+    its dependencies replaces the pinned STM32duinoBLE with the latest one."""
+    _, log, tmp = env
+    examples = tmp / "examples"
+    sketch(examples, "BOUTONS", "LedsBoutons")
+    assert run(env, examples, tmp / "out").returncode == 0
+    installs = [line for line in log.read_text().splitlines() if line.startswith("lib install")]
+    assert installs == [
+        f"lib install STM32duinoBLE@{VERSIONS['STM32duinoBLE']}",
+        f"lib install STeaMi@{VERSIONS['STeaMi']} --no-deps",
+    ]
+
+
 def test_misnamed_ino_fails_and_names_the_folder(env) -> None:
     _, _, tmp = env
     examples = tmp / "examples"
