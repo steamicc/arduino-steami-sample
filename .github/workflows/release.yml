@@ -1,0 +1,66 @@
+name: Release
+
+# On each push to main, semantic-release computes the next version from the
+# Conventional Commits and creates the tag vX.Y.Z with a DRAFT GitHub release
+# (releases are immutable here: no asset can be added once published).
+# Then examples-archive.yml compiles the sketches, attaches
+# steami-exemples-vX.Y.Z.zip to the draft, checks it and publishes the release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Generate token
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.RELEASE_APP_ID }}
+          private_key: ${{ secrets.RELEASE_APP_SECRET }}
+          repositories: >-
+            ["arduino-steami-sample"]
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.generate_token.outputs.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # .releaserc.json writes "tag=vX.Y.Z" to $GITHUB_OUTPUT when a release
+      # is created; the output stays empty when no commit needs a release.
+      - name: Run semantic-release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: npx semantic-release
+
+  archive:
+    name: Examples archive
+    needs: release
+    if: ${{ needs.release.outputs.tag != '' }}
+    uses: ./.github/workflows/examples-archive.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      depuis_publication: true
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_SECRET: ${{ secrets.RELEASE_APP_SECRET }}
