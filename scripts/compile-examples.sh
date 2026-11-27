@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Compile every sketch of examples/ with arduino-cli, for the STeaMi board.
+#
+# Requires arduino-cli and python3 on the PATH. The STM32 core, STM32duinoBLE
+# and the STeaMi library are installed at the versions of versions.json (the
+# only place that names them) when they are missing.
+#
+# The binary of each sketch is copied to DIR/<GROUP>/<Name>.bin (input of
+# scripts/build-examples-archive.py). The script stops with a non-zero code
+# if a sketch does not compile, and names it as GROUP/Name.
+#
+# Usage:
+#   scripts/compile-examples.sh DIR [--examples EXAMPLES_DIR]
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+examples_dir="$script_dir/../examples"
+
+if [ "$#" -eq 3 ] && [ "$2" = "--examples" ]; then
+    examples_dir="$3"
+elif [ "$#" -ne 1 ]; then
+    echo "Usage: $0 DIR [--examples EXAMPLES_DIR]" >&2
+    exit 2
+fi
+if [ ! -d "$examples_dir" ]; then
+    echo "error: $examples_dir is not a directory" >&2
+    exit 2
+fi
+examples_dir="$(cd "$examples_dir" && pwd)"
+mkdir -p "$1"
+out_dir="$(cd "$1" && pwd)"
+
+version() { python3 "$script_dir/versions.py" "$1"; }
+fqbn="$(version fqbn)"
+core="$(version core)"
+core_url="$(version core_url)"
+
+# Core and libraries at the pinned versions. The index is refreshed only when
+# the core is missing, so a warm run needs no network.
+if ! arduino-cli core list 2>/dev/null | grep -q "STMicroelectronics:stm32 *${core}"; then
+    arduino-cli core update-index --additional-urls "$core_url"
+fi
+arduino-cli core install "STMicroelectronics:stm32@${core}" --additional-urls "$core_url"
+for lib in STM32duinoBLE STeaMi; do
+    arduino-cli lib install "${lib}@$(version "$lib")"
+done
+
+total=0
+passed=0
+failed=0
+log="$(mktemp)"
+build_dir="$(mktemp -d)"
+trap 'rm -rf "$log" "$build_dir"' EXIT
+
+# Compile one sketch (id = GROUP/Name) and keep its binary as
+# $out_dir/GROUP/Name.bin.
+compile_sketch() {
+    local id="$1"
+    local name="${id#*/}"
+    rm -f "$out_dir/$id.bin" # never keep a binary from an earlier run
+    if [[ ! "$id" =~ ^[A-Z0-9_-]+/[A-Za-z0-9_]+$ ]]; then
+        echo "error: $id is not a valid id (GROUP/Name, GROUP in upper case, Name in letters, digits, _)" >"$log"
+        return 1
+    fi
+    if [ ! -f "$examples_dir/$id/$name.ino" ]; then
+        echo "error: $id has no $name.ino: the sketch file must have the name of its folder" >"$log"
+        return 1
+    fi
+    rm -rf "${build_dir:?}"/*
+    arduino-cli compile --fqbn "$fqbn" --output-dir "$build_dir" \
+        "$examples_dir/$id" >"$log" 2>&1 || return 1
+    mkdir -p "$out_dir/${id%/*}"
+    cp "$build_dir/$name.ino.bin" "$out_dir/$id.bin" >>"$log" 2>&1
+}
+
+while IFS= read -r folder; do
+    [ -n "$folder" ] || continue
+    id="${folder#"$examples_dir"/}"
+    total=$((total + 1))
+    if compile_sketch "$id"; then
+        passed=$((passed + 1))
+        echo "PASS $id"
+    else
+        failed=$((failed + 1))
+        echo "FAIL $id"
+        tail -n 15 "$log" | sed 's/^/    /'
+    fi
+done < <(find "$examples_dir" -mindepth 2 -maxdepth 2 -type d | sort)
+
+echo "Total: $total | Passed: $passed | Failed: $failed"
+if [ "$total" -eq 0 ]; then
+    echo "error: no sketch found in $examples_dir" >&2
+    exit 1
+fi
+[ "$failed" -eq 0 ]

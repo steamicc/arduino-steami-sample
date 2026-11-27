@@ -1,0 +1,39 @@
+name: CI
+
+# Compile every sketch with arduino-cli. The toolchain versions come from
+# versions.json (single source): nothing is pinned in this file.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # The name of this job is the required status check of the ruleset on main:
+  # keep it stable.
+  compile:
+    name: compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Check the scripts
+        run: |
+          python3 -m pip install --user pytest
+          python3 -m pytest scripts/tests -q
+
+      - name: Compile every sketch
+        run: scripts/compile-examples.sh build/bins
+
+      - name: Upload the binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: steami-exemples-bin
+          path: build/bins
+          if-no-files-found: error
