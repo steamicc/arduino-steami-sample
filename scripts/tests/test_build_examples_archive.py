@@ -6,7 +6,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -59,13 +61,40 @@ class BuildExamplesArchiveTest(unittest.TestCase):
         self.assertEqual(a.read_bytes(), b.read_bytes())
 
     def test_archive_is_reproducible_across_builds(self) -> None:
-        """Two full builds from the same inputs give the same bytes."""
+        """Two full builds from the same inputs give the same bytes.
+
+        The second build runs in a later zip time slot (2 s resolution) and
+        after the inputs' mtimes changed, so a timestamp taken from the clock
+        or from the files would show up as a difference.
+        """
         a = Path(self._tmp.name) / "a.zip"
         b = Path(self._tmp.name) / "b.zip"
         for out in (a, b):
             index = self.mod.construire_index(self.repo, self.bins, "v1.0.0")
             self.mod.ecrire_archive(index, self.bins, out)
+            if out is a:
+                later = time.time() + 3600
+                for path in (*self.bins.rglob("*"), *self.repo.rglob("*")):
+                    os.utime(path, (later, later))
+                time.sleep(2.1)
         self.assertEqual(a.read_bytes(), b.read_bytes())
+
+    def test_archive_format_matches_the_library(self) -> None:
+        """Same zip format as arduino-steami-lib's examples archive."""
+        index = self.mod.construire_index(self.repo, self.bins, "v1.0.0")
+        self.mod.ecrire_archive(index, self.bins, self.out)
+        with zipfile.ZipFile(self.out) as zf:
+            self.assertEqual(
+                zf.namelist(),
+                ["index.json", *sorted(e["bin"] for e in index["exemples"])],
+            )
+            for info in zf.infolist():
+                with self.subTest(entry=info.filename):
+                    self.assertEqual(info.date_time, (1980, 1, 1, 0, 0, 0))
+                    self.assertEqual(info.external_attr >> 16, 0o644)
+                    self.assertEqual(info.compress_type, zipfile.ZIP_DEFLATED)
+                    self.assertEqual(info.create_system, 3)
+            self.assertTrue(zf.read("index.json").endswith(b"\n"))
 
     def test_core_version_is_configurable(self) -> None:
         index = self.mod.construire_index(self.repo, self.bins, "v1.0.0", "9.9.9")
