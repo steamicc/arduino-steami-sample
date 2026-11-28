@@ -133,9 +133,10 @@ jobs:
             # (a maintainer can prepare the bump by hand).
             others=$(gh pr list --head "$BRANCH" --state open \
               --json number,author,isCrossRepository \
-              --jq "[.[] | select(.author.login != \"app/$APP_SLUG\" or .isCrossRepository)] | length")
+              --jq "[.[] | select(.author.login != \"app/$APP_SLUG\" and .isCrossRepository == false)] | length")
             if [ "$others" != "0" ]; then
               echo "::warning::A pull request that is not the robot's is open on $BRANCH: nothing done."
+              echo "pr=" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
@@ -144,6 +145,7 @@ jobs:
               foreign=$(git log --format='%an' origin/main.."$remote_sha" | grep -vxF "${APP_SLUG}[bot]" || true)
               if [ -n "$foreign" ]; then
                 echo "::warning::The branch $BRANCH has commits that are not the robot's: nothing done."
+                echo "pr=" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               lease=("--force-with-lease=$BRANCH:$remote_sha")
@@ -176,7 +178,8 @@ jobs:
       # With the token of the App on purpose: an auto-merge is made by whoever
       # enabled it, and only a merge by the App starts release.yml.
       - name: Enable auto-merge
-        if: steps.lm.outputs.state == 'bump'
+        # No pull request number: the previous step left the branch to somebody else.
+        if: steps.lm.outputs.state == 'bump' && steps.pr.outputs.pr != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           GH_REPO: ${{ github.repository }}
