@@ -77,3 +77,5 @@ republished here under the same license.
 
 The `BOUTONS/LedsBoutons` and `BUZZER/Melodie` sketches come from the pull
 requests #3 and #4 by Aline Dumont.
+
+<!-- mesure CI -->
