@@ -17,7 +17,8 @@
 #include <math.h>
 
 const char CIBLE[] = "";             // "" : le Xiaomi le plus proche ; sinon adresse MAC ou nom BLE
-const uint32_t OUBLI_MS = 30000;     // un capteur muet depuis plus longtemps n'est plus choisi
+const uint32_t OUBLI_MS = 60000;     // un capteur muet depuis plus longtemps n'est plus choisi ; les
+                                     // trames arrivent par à-coups (5 à 15 s) pendant les rafraîchissements de l'écran
 const uint32_t PERIODE_CSV_MS = 5000;
 const int HYSTERESIS = 6;            // dB : un autre capteur doit être nettement plus fort
 const int MAX_CAPTEURS = 8;
