@@ -106,3 +106,21 @@ def test_bad_tag_is_refused(versions: Path) -> None:
     result = run_raw(versions, "--released", "1.3")
     assert result.returncode == 2
     assert "1.3" in result.stderr
+
+
+def test_search_without_the_library_is_an_error(versions: Path, tmp_path: Path) -> None:
+    path = tmp_path / "search.json"
+    path.write_text(json.dumps({"libraries": [], "status": "success"}), encoding="utf-8")
+    result = run_raw(versions, "--released", "v1.3.0", "--search", str(path))
+    assert result.returncode == 2
+    assert "STeaMi" in result.stderr
+
+
+def test_search_without_available_versions_is_an_error(versions: Path, tmp_path: Path) -> None:
+    path = tmp_path / "search.json"
+    path.write_text(
+        json.dumps({"libraries": [{"name": "STeaMi"}], "status": "success"}), encoding="utf-8"
+    )
+    result = run_raw(versions, "--released", "v1.3.0", "--search", str(path))
+    assert result.returncode == 2
+    assert "available_versions" in result.stderr

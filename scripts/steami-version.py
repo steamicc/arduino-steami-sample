@@ -55,8 +55,10 @@ def available_versions(search: dict) -> list[str]:
     """Return the available_versions of the library named exactly "STeaMi"."""
     for library in search.get("libraries", []):
         if library.get("name") == KEY:
-            return list(library.get("available_versions", []))
-    return []
+            if "available_versions" not in library:
+                raise ValueError(f'no "available_versions" for "{KEY}" in the search output')
+            return list(library["available_versions"])
+    raise ValueError(f'library "{KEY}" not found in the search output')
 
 
 def decide(released: str, pinned: str, available: list[str] | None) -> str:

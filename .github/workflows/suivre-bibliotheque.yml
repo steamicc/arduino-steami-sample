@@ -41,6 +41,8 @@ jobs:
         with:
           # The push is made with the token of the App, not the one of checkout.
           persist-credentials: false
+          # The history of main, to tell the commits of a leftover branch.
+          fetch-depth: 0
 
       # The hourly run stops here when the sample is up to date, before any
       # installation.
@@ -127,6 +129,25 @@ jobs:
           if [ -n "$pr" ]; then
             echo "Pull request #$pr already open for $BRANCH."
           else
+            # Never overwrite the work of somebody else on this branch name
+            # (a maintainer can prepare the bump by hand).
+            others=$(gh pr list --head "$BRANCH" --state open \
+              --json number,author,isCrossRepository \
+              --jq "[.[] | select(.author.login != \"app/$APP_SLUG\" or .isCrossRepository)] | length")
+            if [ "$others" != "0" ]; then
+              echo "::warning::A pull request that is not the robot's is open on $BRANCH: nothing done."
+              exit 0
+            fi
+            git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
+            lease=()
+            if remote_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH"); then
+              foreign=$(git log --format='%an' origin/main.."$remote_sha" | grep -vxF "${APP_SLUG}[bot]" || true)
+              if [ -n "$foreign" ]; then
+                echo "::warning::The branch $BRANCH has commits that are not the robot's: nothing done."
+                exit 0
+              fi
+              lease=("--force-with-lease=$BRANCH:$remote_sha")
+            fi
             python3 scripts/steami-version.py --released "$TAG" \
               --search "$RUNNER_TEMP/search.json" --write
             git diff --stat
@@ -136,11 +157,11 @@ jobs:
             git switch -c "$BRANCH"
             git add versions.json
             git commit -m "$TITLE"
-            # The branch belongs to the robot: a leftover of a closed pull
-            # request is replaced.
-            git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" "$BRANCH"
+            # A leftover of the robot (closed pull request) is replaced, and
+            # only if the branch is still as checked above.
+            git push "${lease[@]}" "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" "$BRANCH"
             url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body \
-              "The Arduino Library Manager now lists STeaMi $VERSION. This pull request pins it in \`versions.json\`; every sketch is compiled with it, and the pull request merges by itself when \`compile\` is green. Opened by \`suivre-bibliotheque.yml\`.")
+              "The Arduino Library Manager now lists STeaMi $VERSION. This pull request pins it in \`versions.json\`; every sketch is compiled with it, and the pull request merges by itself when \`compile\` is green. Closing it without merging makes the next hourly run reopen it: to stop that, disable the workflow. Opened by \`suivre-bibliotheque.yml\`.")
             pr="${url##*/}"
             echo "Opened pull request #$pr."
           fi
