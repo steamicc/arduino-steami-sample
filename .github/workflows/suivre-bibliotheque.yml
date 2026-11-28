@@ -23,6 +23,11 @@ name: Follow the STeaMi library
 # GitHub App, never with GITHUB_TOKEN: only a merge made by the App starts
 # release.yml (a push made with GITHUB_TOKEN starts no workflow), and so the
 # release of the sample and the robots that follow it.
+#
+# Auto-merge goes through the shared guard .github/scripts/garde-fusion-auto.sh
+# (a byte-for-byte copy, checked by scripts/tests/test_garde_fusion_auto.py).
+# When auto-merge is already enabled and `compile` is red, the guard re-runs it
+# once, then fails this run so that the blocked pull request gets noticed.
 
 on:
   workflow_dispatch:
@@ -108,6 +113,8 @@ jobs:
           repositories: arduino-steami-sample
           permission-contents: write
           permission-pull-requests: write
+          # The guard re-runs a red required check once (gh run rerun).
+          permission-actions: write
 
       - name: Open the pull request
         id: pr
@@ -226,52 +233,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
           PR: ${{ steps.pr.outputs.pr }}
-        run: |
-          set -euo pipefail
-          if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
-            echo "::error::Pull request number not found (\"$PR\")."
-            exit 1
-          fi
-          # Never an auto-merge for a pull request from a fork or opened by
-          # somebody else than the robot.
-          state=$(gh pr view "$PR" --json isCrossRepository,author,isDraft,autoMergeRequest)
-          if jq -e .isCrossRepository <<<"$state" >/dev/null; then
-            echo "::error::Pull request #$PR comes from a fork: auto-merge refused."
-            exit 1
-          fi
-          author=$(jq -r .author.login <<<"$state")
-          if [ "$author" != "app/$APP_SLUG" ] && [ "$author" != "${APP_SLUG}[bot]" ]; then
-            echo "::error::Pull request #$PR was opened by $author, not by the robot: auto-merge refused."
-            exit 1
-          fi
-          # Without a required check, "gh pr merge --auto" would merge at once,
-          # even with a red CI: require the check "compile" on the default
-          # branch, and that the App cannot bypass the ruleset that requires it.
-          default=$(gh api "repos/$GH_REPO" --jq .default_branch)
-          rules=$(gh api "repos/$GH_REPO/rules/branches/$default")
-          if ! jq -e 'any(.[]; .type == "required_status_checks"
-                and any(.parameters.required_status_checks[]; .context == "compile"))' \
-                <<<"$rules" >/dev/null; then
-            echo "::warning::Auto-merge not enabled for #$PR: $default does not require the check \"compile\". Merge it by hand."
-            exit 0
-          fi
-          for id in $(jq -r '[.[] | select(.type == "required_status_checks") | .ruleset_id] | unique | .[]' <<<"$rules"); do
-            bypass=$(gh api "repos/$GH_REPO/rulesets/$id" --jq '.current_user_can_bypass // "inconnu"')
-            if [ "$bypass" != "never" ]; then
-              echo "::warning::Auto-merge not enabled for #$PR: the App can bypass the ruleset $id ($bypass). Merge it by hand."
-              exit 0
-            fi
-          done
-          if jq -e .isDraft <<<"$state" >/dev/null; then
-            echo "Pull request #$PR is a draft: auto-merge not enabled."
-            exit 0
-          fi
-          if jq -e '.autoMergeRequest != null' <<<"$state" >/dev/null; then
-            echo "Auto-merge of pull request #$PR is already enabled."
-            exit 0
-          fi
-          if ! gh pr merge "$PR" --auto --squash; then
-            echo "::error::Could not enable auto-merge of #$PR: check \"Allow auto-merge\" and squash merge (Settings > General > Pull Requests)."
-            exit 1
-          fi
-          echo "Auto-merge (squash) enabled for #$PR: it merges when compile is green."
+        # The shared guard of the steamicc robots (fork, author, required
+        # check "compile" on the default branch, no bypass of its ruleset,
+        # draft and "garder-ouverte" label, then one re-run of a red check
+        # when auto-merge is already enabled): never edit it here.
+        run: bash .github/scripts/garde-fusion-auto.sh "$GITHUB_REPOSITORY" "$PR" "$APP_SLUG" compile
