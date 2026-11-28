@@ -4,7 +4,8 @@ name: Release
 # Conventional Commits and creates the tag vX.Y.Z with a DRAFT GitHub release
 # (releases are immutable here: no asset can be added once published).
 # Then examples-archive.yml compiles the sketches, attaches
-# steami-exemples-vX.Y.Z.zip to the draft, checks it and publishes the release.
+# steami-exemples-vX.Y.Z.zip to the draft, checks it, publishes the release
+# and dispatches the wiki bot suivre-croquis-sample.yml (see its header).
 
 on:
   push:
@@ -31,12 +32,14 @@ jobs:
     steps:
       - name: Generate token
         id: generate_token
-        uses: tibdex/github-app-token@v2
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          app_id: ${{ secrets.RELEASE_APP_ID }}
-          private_key: ${{ secrets.RELEASE_APP_SECRET }}
-          repositories: >-
-            ["arduino-steami-sample"]
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_SECRET }}
+          owner: steamicc
+          repositories: arduino-steami-sample
+          # Pushes the tag and creates the draft release.
+          permission-contents: write
 
       - uses: actions/checkout@v4
         with:
