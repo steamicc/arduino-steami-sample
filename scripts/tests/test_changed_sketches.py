@@ -103,6 +103,7 @@ def test_files_without_effect_change_nothing(root: Path) -> None:
         ".github/workflows/examples-archive.yml",
         "scripts/build-examples-archive.py",
         "scripts/steami-version.py",
+        "scripts/bump-branch.sh",
         ".github/workflows/suivre-bibliotheque.yml",
         "scripts/tests/test_x.py",
         "package.json",

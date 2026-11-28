@@ -13,6 +13,12 @@ name: Follow the STeaMi library
 # suivre-paquet.yml does in the image repository: a release of the library
 # alone does not mean a package.
 #
+# The branch is built from main fetched again after the wait (an earlier
+# bump can merge meanwhile), by scripts/bump-branch.sh. When the pull request
+# of the robot conflicts with main, the next run rebuilds its branch from main
+# (only commits of the robot, with a lease); when main already pins the
+# release, it is closed.
+#
 # The pull request is opened and its auto-merge enabled with the token of the
 # GitHub App, never with GITHUB_TOKEN: only a merge made by the App starts
 # release.yml (a push made with GITHUB_TOKEN starts no workflow), and so the
@@ -125,9 +131,26 @@ jobs:
               --jq "[.[] | select(.author.login == \"app/$APP_SLUG\" and .isCrossRepository == false)]"
           }
 
+          user_id=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+
           pr=$(bot_prs | jq -r --arg b "$BRANCH" '[.[] | select(.headRefName == $b)][0].number // empty')
+          rebuild=false
           if [ -n "$pr" ]; then
-            echo "Pull request #$pr already open for $BRANCH."
+            # GitHub computes mergeable lazily: UNKNOWN at first.
+            mergeable=UNKNOWN
+            for _ in 1 2 3 4 5 6; do
+              mergeable=$(gh pr view "$pr" --json mergeable --jq .mergeable)
+              if [ "$mergeable" != "UNKNOWN" ]; then
+                break
+              fi
+              sleep 10
+            done
+            echo "Pull request #$pr already open for $BRANCH ($mergeable)."
+            if [ "$mergeable" = "CONFLICTING" ]; then
+              rebuild=true
+            fi
           else
             # Never overwrite the work of somebody else on this branch name
             # (a maintainer can prepare the bump by hand).
@@ -139,33 +162,51 @@ jobs:
               echo "pr=" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
-            lease=()
-            if remote_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH"); then
-              foreign=$(git log --format='%an' origin/main.."$remote_sha" | grep -vxF "${APP_SLUG}[bot]" || true)
-              if [ -n "$foreign" ]; then
+          fi
+
+          if [ -z "$pr" ] || [ "$rebuild" = "true" ]; then
+            # A leftover of the robot (closed pull request) or the branch of
+            # its conflicting pull request is replaced. The branch is built
+            # from main as it is now (fetched again, not the checkout of the
+            # run: an earlier bump can merge during the wait), after checking
+            # the pin on that main and that the branch has only commits of
+            # the robot, and pushed with a lease on the branch as checked.
+            TAG="$TAG" SEARCH="$RUNNER_TEMP/search.json" BRANCH="$BRANCH" \
+              TITLE="$TITLE" BOT="${APP_SLUG}[bot]" \
+              PUSH_URL="https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" \
+              scripts/bump-branch.sh > "$RUNNER_TEMP/bump.txt"
+            cat "$RUNNER_TEMP/bump.txt"
+            result=$(sed -n 's/^result=//p' "$RUNNER_TEMP/bump.txt" | tail -n 1)
+            case "$result" in
+              pushed)
+                if [ -n "$pr" ]; then
+                  echo "Pull request #$pr rebuilt from main."
+                else
+                  url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body \
+                    "The Arduino Library Manager now lists STeaMi $VERSION. This pull request pins it in \`versions.json\`; every sketch is compiled with it, and the pull request merges by itself when \`compile\` is green. Closing it without merging makes the next hourly run reopen it: to stop that, disable the workflow. Opened by \`suivre-bibliotheque.yml\`.")
+                  pr="${url##*/}"
+                  echo "Opened pull request #$pr."
+                fi
+                ;;
+              up-to-date)
+                echo "::notice::main already pins STeaMi $VERSION or a newer version: nothing to open."
+                # The branch holds only commits of the robot (checked first).
+                if [ -n "$pr" ]; then
+                  gh pr close "$pr" --comment "main already pins STeaMi $VERSION or a newer version." --delete-branch
+                fi
+                echo "pr=" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              foreign)
                 echo "::warning::The branch $BRANCH has commits that are not the robot's: nothing done."
                 echo "pr=" >> "$GITHUB_OUTPUT"
                 exit 0
-              fi
-              lease=("--force-with-lease=$BRANCH:$remote_sha")
-            fi
-            python3 scripts/steami-version.py --released "$TAG" \
-              --search "$RUNNER_TEMP/search.json" --write
-            git diff --stat
-            user_id=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
-            git config user.name "${APP_SLUG}[bot]"
-            git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
-            git switch -c "$BRANCH"
-            git add versions.json
-            git commit -m "$TITLE"
-            # A leftover of the robot (closed pull request) is replaced, and
-            # only if the branch is still as checked above.
-            git push "${lease[@]}" "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" "$BRANCH"
-            url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body \
-              "The Arduino Library Manager now lists STeaMi $VERSION. This pull request pins it in \`versions.json\`; every sketch is compiled with it, and the pull request merges by itself when \`compile\` is green. Closing it without merging makes the next hourly run reopen it: to stop that, disable the workflow. Opened by \`suivre-bibliotheque.yml\`.")
-            pr="${url##*/}"
-            echo "Opened pull request #$pr."
+                ;;
+              *)
+                echo "::error::scripts/bump-branch.sh gave no result (\"$result\")."
+                exit 1
+                ;;
+            esac
           fi
 
           # An older bump the new one replaces.

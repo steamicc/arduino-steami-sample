@@ -51,6 +51,7 @@ SANS_EFFET = (
     ".github/workflows/examples-archive.yml",
     "scripts/build-examples-archive.py",
     "scripts/steami-version.py",
+    "scripts/bump-branch.sh",
     ".github/workflows/suivre-bibliotheque.yml",
     "scripts/tests/*",
     "package*.json",
