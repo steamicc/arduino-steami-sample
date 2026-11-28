@@ -20,7 +20,7 @@ examples/
   Arduino requirement).
 - The wiki identifies a sketch as `GROUP/Name` (for example
   `BOUTONS/LedsBoutons`): the group is in upper case, the name is CamelCase.
-- Groups: `CAPTEURS`, `ECRAN`, `PREMIERS`, `CARTE`, `BOUTONS`, `BUZZER`.
+- Groups: `CAPTEURS`, `ECRAN`, `PREMIERS`, `CARTE`, `BOUTONS`, `BUZZER`, `BLE`.
 - `versions.json` is the single place that names the toolchain: STM32 core,
   board (FQBN), STM32duinoBLE and STeaMi library versions.
   Nothing else in the repository repeats them.
