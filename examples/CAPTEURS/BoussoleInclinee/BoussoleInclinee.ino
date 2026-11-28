@@ -1,4 +1,4 @@
-// Croquis de la page du wiki « Capteurs (docs/software/arduino/capteurs.md) ».
+// Croquis de la page du wiki « Boussole : magnétomètre (docs/software/arduino/capteurs/boussole.md) ».
 
 #include <SteamiCompass.h>
 #include <SteamiButtons.h>
