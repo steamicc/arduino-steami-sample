@@ -3,5 +3,5 @@
   "core_url": "https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json",
   "fqbn": "STMicroelectronics:stm32:STeaMi",
   "STM32duinoBLE": "1.5.0",
-  "STeaMi": "0.46.1"
+  "STeaMi": "0.46.5"
 }
