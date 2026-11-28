@@ -68,10 +68,10 @@ def sketch(examples: Path, group: str, name: str, ino: str | None = None) -> Pat
     return folder
 
 
-def run(env, examples: Path, out: Path) -> subprocess.CompletedProcess:
+def run(env, examples: Path, out: Path, *extra: str) -> subprocess.CompletedProcess:
     environment, _, _ = env
     return subprocess.run(
-        ["bash", str(SCRIPT), str(out), "--examples", str(examples)],
+        ["bash", str(SCRIPT), str(out), "--examples", str(examples), *extra],
         capture_output=True,
         text=True,
         env=environment,
@@ -188,3 +188,35 @@ def test_lib_install_is_retried_after_updating_a_stale_index(env) -> None:
     lines = [line for line in log.read_text().splitlines() if line.startswith("lib ")]
     ble = f"lib install STM32duinoBLE@{VERSIONS['STM32duinoBLE']}"
     assert lines[:3] == [ble, "lib update-index", ble]
+
+
+def test_only_compiles_the_listed_sketches(env) -> None:
+    _, _, tmp = env
+    examples = tmp / "examples"
+    sketch(examples, "BOUTONS", "LedsBoutons")
+    sketch(examples, "BUZZER", "Melodie")
+    out = tmp / "out"
+    result = run(env, examples, out, "--only", "BUZZER/Melodie")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (out / "BUZZER" / "Melodie.bin").is_file()
+    assert not (out / "BOUTONS" / "LedsBoutons.bin").exists()
+    assert "Total: 1 | Passed: 1 | Failed: 0" in result.stdout
+
+
+def test_only_is_repeatable(env) -> None:
+    _, _, tmp = env
+    examples = tmp / "examples"
+    sketch(examples, "BOUTONS", "LedsBoutons")
+    sketch(examples, "BUZZER", "Melodie")
+    result = run(env, examples, tmp / "out", "--only", "BUZZER/Melodie", "--only", "BOUTONS/LedsBoutons")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Total: 2 | Passed: 2 | Failed: 0" in result.stdout
+
+
+def test_only_unknown_sketch_fails(env) -> None:
+    _, _, tmp = env
+    examples = tmp / "examples"
+    sketch(examples, "BUZZER", "Melodie")
+    result = run(env, examples, tmp / "out", "--only", "NOPE/Rien")
+    assert result.returncode != 0
+    assert "FAIL NOPE/Rien" in result.stdout

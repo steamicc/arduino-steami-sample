@@ -117,6 +117,18 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
+      # Saved here, on main, for the pull requests: a pull request can restore
+      # a cache saved on main, never the reverse (ci.yml only restores it).
+      - name: Read the core version
+        id: versions
+        run: echo "core=$(python3 scripts/versions.py core)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Arduino core
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino15-${{ runner.os }}-stm32-${{ steps.versions.outputs.core }}
+
       # Installs the core and the libraries at the versions of versions.json.
       - name: Compile every sketch
         run: scripts/compile-examples.sh build/bins

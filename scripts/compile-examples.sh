@@ -8,31 +8,52 @@
 # only place that names them) when they are missing.
 #
 # The binary of each sketch is copied to DIR/<GROUP>/<Name>.bin (input of
-# scripts/build-examples-archive.py). Every sketch is compiled; each one that
-# does not compile is named as "FAIL GROUP/Name" with the end of its log, and
+# scripts/build-examples-archive.py). Every sketch is compiled, or only the
+# ones given with --only (repeatable); each one that does not compile, or that
+# does not exist, is named as "FAIL GROUP/Name" with the end of its log, and
 # the script then exits with a non-zero code.
 #
 # Usage:
-#   scripts/compile-examples.sh DIR [--examples EXAMPLES_DIR]
+#   scripts/compile-examples.sh DIR [--examples EXAMPLES_DIR] [--only GROUP/Name]...
 
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 examples_dir="$script_dir/../examples"
 
-if [ "$#" -eq 3 ] && [ "$2" = "--examples" ]; then
-    examples_dir="$3"
-elif [ "$#" -ne 1 ]; then
-    echo "Usage: $0 DIR [--examples EXAMPLES_DIR]" >&2
+usage="Usage: $0 DIR [--examples EXAMPLES_DIR] [--only GROUP/Name]..."
+if [ "$#" -lt 1 ]; then
+    echo "$usage" >&2
     exit 2
 fi
+out_arg="$1"
+shift
+only=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --examples)
+            [ "$#" -ge 2 ] || { echo "$usage" >&2; exit 2; }
+            examples_dir="$2"
+            shift 2
+            ;;
+        --only)
+            [ "$#" -ge 2 ] || { echo "$usage" >&2; exit 2; }
+            only+=("$2")
+            shift 2
+            ;;
+        *)
+            echo "$usage" >&2
+            exit 2
+            ;;
+    esac
+done
 if [ ! -d "$examples_dir" ]; then
     echo "error: $examples_dir is not a directory" >&2
     exit 2
 fi
 examples_dir="$(cd "$examples_dir" && pwd)"
-mkdir -p "$1"
-out_dir="$(cd "$1" && pwd)"
+mkdir -p "$out_arg"
+out_dir="$(cd "$out_arg" && pwd)"
 
 version() { python3 "$script_dir/versions.py" "$1"; }
 fqbn="$(version fqbn)"
@@ -95,9 +116,9 @@ compile_sketch() {
     cp "$build_dir/$name.ino.bin" "$out_dir/$id.bin" >>"$log" 2>&1
 }
 
-while IFS= read -r folder; do
-    [ -n "$folder" ] || continue
-    id="${folder#"$examples_dir"/}"
+# Compile one sketch and report it.
+run_sketch() {
+    local id="$1"
     total=$((total + 1))
     if compile_sketch "$id"; then
         passed=$((passed + 1))
@@ -107,7 +128,18 @@ while IFS= read -r folder; do
         echo "FAIL $id"
         tail -n 15 "$log" | sed 's/^/    /'
     fi
-done < <(find "$examples_dir" -mindepth 2 -maxdepth 2 -type d | sort)
+}
+
+if [ "${#only[@]}" -gt 0 ]; then
+    for id in "${only[@]}"; do
+        run_sketch "$id"
+    done
+else
+    while IFS= read -r folder; do
+        [ -n "$folder" ] || continue
+        run_sketch "${folder#"$examples_dir"/}"
+    done < <(find "$examples_dir" -mindepth 2 -maxdepth 2 -type d | sort)
+fi
 
 echo "Total: $total | Passed: $passed | Failed: $failed"
 if [ "$total" -eq 0 ]; then
