@@ -16,7 +16,11 @@ void setup() {
 void loop() {
   float cap = mag.headingFlatOnly();  // carte posée à plat
   Serial.print("Cap : ");
-  Serial.print(lroundf(cap) % 360);  // arrondi au degré, jamais 360
+  if (isnan(cap)) {
+    Serial.print("nan");  // le capteur n'a pas répondu
+  } else {
+    Serial.print(lroundf(cap) % 360);  // arrondi au degré, jamais 360
+  }
   Serial.print(" deg (");
   Serial.print(mag.directionLabel(cap));
   Serial.println(")");
