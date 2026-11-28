@@ -102,6 +102,8 @@ def test_files_without_effect_change_nothing(root: Path) -> None:
         ".github/workflows/release.yml",
         ".github/workflows/examples-archive.yml",
         "scripts/build-examples-archive.py",
+        "scripts/steami-version.py",
+        ".github/workflows/suivre-bibliotheque.yml",
         "scripts/tests/test_x.py",
         "package.json",
         "package-lock.json",

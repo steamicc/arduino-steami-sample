@@ -50,6 +50,8 @@ SANS_EFFET = (
     ".github/workflows/release.yml",
     ".github/workflows/examples-archive.yml",
     "scripts/build-examples-archive.py",
+    "scripts/steami-version.py",
+    ".github/workflows/suivre-bibliotheque.yml",
     "scripts/tests/*",
     "package*.json",
     ".releaserc*",
