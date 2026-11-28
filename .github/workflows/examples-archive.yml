@@ -207,3 +207,33 @@ jobs:
             gh release edit "$TAG" -R "$REPO" --draft=false --latest=false
           fi
           echo "::notice::Release ${TAG} published in ${REPO}."
+
+      - name: Jeton pour les robots en aval
+        id: jeton_aval
+        if: ${{ !inputs.dry_run }}
+        continue-on-error: true   # without a token we warn and the crons take over
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_SECRET }}
+          owner: steamicc
+          repositories: wiki_steami          # the repositories of the targets, comma-separated
+          permission-actions: write
+
+      - name: Déclencher les robots en aval
+        if: ${{ !inputs.dry_run }}
+        continue-on-error: true   # a failed trigger never fails the publication
+        env:
+          GH_TOKEN: ${{ steps.jeton_aval.outputs.token }}
+          JETON: ${{ steps.jeton_aval.outcome }}
+        run: |
+          if [ "$JETON" != success ]; then
+            echo "::warning::App token unavailable: the downstream bots will run on their cron."
+            exit 0
+          fi
+          # One target per "<repo> <bot>" string; a failed target does not stop the next ones.
+          for cible in "wiki_steami suivre-croquis-sample.yml"; do
+            read -r repo workflow <<<"$cible"
+            gh workflow run "$workflow" -R "steamicc/$repo" \
+              || echo "::warning::Bot $workflow of steamicc/$repo not triggered: its cron will take over (check the App's Actions write permission and its installation on this repository)."
+          done
