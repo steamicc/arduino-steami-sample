@@ -18,6 +18,14 @@ name: Examples archive
 # asset is deleted and the job fails, so the draft is not published. The zip is
 # always uploaded as a workflow artifact before any write; a manual run with
 # dry_run stops there.
+#
+# Downstream: once the release is published, a second App token (Actions write
+# on steamicc/wiki_steami only) dispatches suivre-croquis-sample.yml in the
+# wiki, which reads /releases/latest of this repository and opens its pull
+# request pinning the new archive in exemples-arduino-sample.json. This also
+# happens on a manual run without dry_run, so re-running this workflow starts
+# the wiki bot again. A missing token or a failed dispatch only warns and never
+# fails the publication: the daily cron of the wiki bot then takes over.
 
 on:
   workflow_call:
