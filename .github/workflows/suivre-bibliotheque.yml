@@ -1,0 +1,236 @@
+name: Follow the STeaMi library
+
+# Bump the version of STeaMi in versions.json once the Arduino Library Manager
+# lists the new release of the library, in a single pull request that merges
+# by itself when the required check `compile` is green.
+#
+# Started by the publication of arduino-steami-lib (workflow_dispatch) and
+# every hour (the Library Manager can take hours to index a release: the
+# hourly run then does nothing until it does, and opens one pull request).
+#
+# The published release is read in the distribution repository
+# steamicc/arduino-steami, the one the Library Manager indexes, like
+# suivre-paquet.yml does in the image repository: a release of the library
+# alone does not mean a package.
+#
+# The pull request is opened and its auto-merge enabled with the token of the
+# GitHub App, never with GITHUB_TOKEN: only a merge made by the App starts
+# release.yml (a push made with GITHUB_TOKEN starts no workflow), and so the
+# release of the sample and the robots that follow it.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: suivre-bibliotheque
+  cancel-in-progress: false
+
+jobs:
+  suivre:
+    name: nouvelle version de STeaMi ?
+    if: github.repository == 'steamicc/arduino-steami-sample'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The push is made with the token of the App, not the one of checkout.
+          persist-credentials: false
+          # The history of main, to tell the commits of a leftover branch.
+          fetch-depth: 0
+
+      # The hourly run stops here when the sample is up to date, before any
+      # installation.
+      - name: Compare the release with versions.json
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh api repos/steamicc/arduino-steami/releases/latest --jq .tag_name)
+          echo "Published release: $TAG"
+          {
+            echo "tag=$TAG"
+            python3 scripts/steami-version.py --released "$TAG"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Install Arduino CLI
+        if: steps.compare.outputs.state == 'new'
+        uses: arduino/setup-arduino-cli@v2
+
+      # Up to 7 tries, 300 s apart. After the last one, the hourly run starts
+      # again.
+      - name: Wait for the Library Manager
+        id: lm
+        if: steps.compare.outputs.state == 'new'
+        env:
+          TAG: ${{ steps.compare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          state="wait"
+          for attempt in 1 2 3 4 5 6 7; do
+            arduino-cli lib update-index
+            arduino-cli lib search STeaMi --format json > "$RUNNER_TEMP/search.json"
+            state=$(python3 scripts/steami-version.py --released "$TAG" \
+              --search "$RUNNER_TEMP/search.json" | sed -n 's/^state=//p')
+            echo "Try $attempt/7: $state"
+            if [ "$state" != "wait" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 7 ]; then
+              sleep 300
+            fi
+          done
+          if [ "$state" = "wait" ]; then
+            echo "::notice::The Library Manager does not list STeaMi ${TAG#v} yet: the next hourly run will try again."
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+
+      - name: Generate token
+        id: app
+        if: steps.lm.outputs.state == 'bump'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_SECRET }}
+          owner: steamicc
+          repositories: arduino-steami-sample
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open the pull request
+        id: pr
+        if: steps.lm.outputs.state == 'bump'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          TAG: ${{ steps.compare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          BRANCH="fix/steami-$VERSION"
+          TITLE="fix(deps): Compile the sketches with STeaMi $VERSION."
+
+          # Open pull requests of the robot, by number (no --author: the
+          # Search API lags behind).
+          bot_prs() {
+            gh pr list --state open --limit 100 \
+              --json number,headRefName,author,isCrossRepository \
+              --jq "[.[] | select(.author.login == \"app/$APP_SLUG\" and .isCrossRepository == false)]"
+          }
+
+          pr=$(bot_prs | jq -r --arg b "$BRANCH" '[.[] | select(.headRefName == $b)][0].number // empty')
+          if [ -n "$pr" ]; then
+            echo "Pull request #$pr already open for $BRANCH."
+          else
+            # Never overwrite the work of somebody else on this branch name
+            # (a maintainer can prepare the bump by hand).
+            others=$(gh pr list --head "$BRANCH" --state open \
+              --json number,author,isCrossRepository \
+              --jq "[.[] | select(.author.login != \"app/$APP_SLUG\" and .isCrossRepository == false)] | length")
+            if [ "$others" != "0" ]; then
+              echo "::warning::A pull request that is not the robot's is open on $BRANCH: nothing done."
+              echo "pr=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
+            lease=()
+            if remote_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH"); then
+              foreign=$(git log --format='%an' origin/main.."$remote_sha" | grep -vxF "${APP_SLUG}[bot]" || true)
+              if [ -n "$foreign" ]; then
+                echo "::warning::The branch $BRANCH has commits that are not the robot's: nothing done."
+                echo "pr=" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              lease=("--force-with-lease=$BRANCH:$remote_sha")
+            fi
+            python3 scripts/steami-version.py --released "$TAG" \
+              --search "$RUNNER_TEMP/search.json" --write
+            git diff --stat
+            user_id=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+            git config user.name "${APP_SLUG}[bot]"
+            git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+            git switch -c "$BRANCH"
+            git add versions.json
+            git commit -m "$TITLE"
+            # A leftover of the robot (closed pull request) is replaced, and
+            # only if the branch is still as checked above.
+            git push "${lease[@]}" "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" "$BRANCH"
+            url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body \
+              "The Arduino Library Manager now lists STeaMi $VERSION. This pull request pins it in \`versions.json\`; every sketch is compiled with it, and the pull request merges by itself when \`compile\` is green. Closing it without merging makes the next hourly run reopen it: to stop that, disable the workflow. Opened by \`suivre-bibliotheque.yml\`.")
+            pr="${url##*/}"
+            echo "Opened pull request #$pr."
+          fi
+
+          # An older bump the new one replaces.
+          for other in $(bot_prs | jq -r --arg b "$BRANCH" '.[] | select((.headRefName | startswith("fix/steami-")) and .headRefName != $b) | .number'); do
+            gh pr close "$other" --comment "Superseded by #$pr." --delete-branch
+          done
+
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      # With the token of the App on purpose: an auto-merge is made by whoever
+      # enabled it, and only a merge by the App starts release.yml.
+      - name: Enable auto-merge
+        # No pull request number: the previous step left the branch to somebody else.
+        if: steps.lm.outputs.state == 'bump' && steps.pr.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          PR: ${{ steps.pr.outputs.pr }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
+            echo "::error::Pull request number not found (\"$PR\")."
+            exit 1
+          fi
+          # Never an auto-merge for a pull request from a fork or opened by
+          # somebody else than the robot.
+          state=$(gh pr view "$PR" --json isCrossRepository,author,isDraft,autoMergeRequest)
+          if jq -e .isCrossRepository <<<"$state" >/dev/null; then
+            echo "::error::Pull request #$PR comes from a fork: auto-merge refused."
+            exit 1
+          fi
+          author=$(jq -r .author.login <<<"$state")
+          if [ "$author" != "app/$APP_SLUG" ] && [ "$author" != "${APP_SLUG}[bot]" ]; then
+            echo "::error::Pull request #$PR was opened by $author, not by the robot: auto-merge refused."
+            exit 1
+          fi
+          # Without a required check, "gh pr merge --auto" would merge at once,
+          # even with a red CI: require the check "compile" on the default
+          # branch, and that the App cannot bypass the ruleset that requires it.
+          default=$(gh api "repos/$GH_REPO" --jq .default_branch)
+          rules=$(gh api "repos/$GH_REPO/rules/branches/$default")
+          if ! jq -e 'any(.[]; .type == "required_status_checks"
+                and any(.parameters.required_status_checks[]; .context == "compile"))' \
+                <<<"$rules" >/dev/null; then
+            echo "::warning::Auto-merge not enabled for #$PR: $default does not require the check \"compile\". Merge it by hand."
+            exit 0
+          fi
+          for id in $(jq -r '[.[] | select(.type == "required_status_checks") | .ruleset_id] | unique | .[]' <<<"$rules"); do
+            bypass=$(gh api "repos/$GH_REPO/rulesets/$id" --jq '.current_user_can_bypass // "inconnu"')
+            if [ "$bypass" != "never" ]; then
+              echo "::warning::Auto-merge not enabled for #$PR: the App can bypass the ruleset $id ($bypass). Merge it by hand."
+              exit 0
+            fi
+          done
+          if jq -e .isDraft <<<"$state" >/dev/null; then
+            echo "Pull request #$PR is a draft: auto-merge not enabled."
+            exit 0
+          fi
+          if jq -e '.autoMergeRequest != null' <<<"$state" >/dev/null; then
+            echo "Auto-merge of pull request #$PR is already enabled."
+            exit 0
+          fi
+          if ! gh pr merge "$PR" --auto --squash; then
+            echo "::error::Could not enable auto-merge of #$PR: check \"Allow auto-merge\" and squash merge (Settings > General > Pull Requests)."
+            exit 1
+          fi
+          echo "Auto-merge (squash) enabled for #$PR: it merges when compile is green."
